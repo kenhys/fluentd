@@ -61,6 +61,10 @@ module Fluent::Plugin
       @key_deleters = if @remove_keys
                         @remove_keys.map { |k| record_accessor_create(k) }
                       end
+      @key_remove_regex = if @remove_keys
+                            @remove_keys.map { |k| k if k.is_a?(Regexp) }.compact
+                          end
+      log.info { "target:#{@key_remove_regex}" }
 
       placeholder_expander_params = {
         log: log,
@@ -103,6 +107,11 @@ module Fluent::Plugin
             time = Fluent::EventTime.from_time(Time.at(new_record[@renew_time_key].to_f))
           end
           @key_deleters.each { |deleter| deleter.delete(new_record) } if @key_deleters
+          @key_remove_regex.each do |remove_regexp|
+            remove_target_keys = record.keys.each { |k| k if remove_regexp.match?(k) }.compact
+            log.info { "target:#{remove_target_keys}" }
+            record_accessor_create(remove_target_keys).delete(new_record)
+          end
           new_es.add(time, new_record)
         rescue => e
           router.emit_error_event(tag, time, record, e)

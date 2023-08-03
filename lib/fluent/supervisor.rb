@@ -613,6 +613,87 @@ module Fluent
       se_config
     end
 
+    class LoggerInitializer
+      def initialize(path, level, chuser, chgroup, opts, log_rotate_age: nil, log_rotate_size: nil)
+        @path = path
+        @level = level
+        @chuser = chuser
+        @chgroup = chgroup
+        @opts = opts
+        @log_rotate_age = log_rotate_age
+        @log_rotate_size = log_rotate_size
+      end
+
+      def worker_id_suffixed_path(worker_id, path)
+        require 'pathname'
+
+        Pathname(path).sub_ext("-#{worker_id}#{Pathname(path).extname}").to_s
+      end
+
+      def init(process_type, worker_id)
+        @opts[:process_type] = process_type
+        @opts[:worker_id] = worker_id
+
+        if @path && @path != "-"
+          unless File.exist?(@path)
+            FileUtils.mkdir_p(File.dirname(@path), mode: @opts[:dir_permission] || Fluent::DEFAULT_DIR_PERMISSION)
+          end
+
+          @logdev = if @log_rotate_age || @log_rotate_size
+                     Fluent::LogDeviceIO.new(Fluent.windows? ?
+                                               worker_id_suffixed_path(worker_id, @path) : @path,
+                                             shift_age: @log_rotate_age, shift_size: @log_rotate_size)
+                   else
+                     File.open(@path, "a")
+                   end
+          if @chuser || @chgroup
+            chuid = @chuser ? ServerEngine::Privilege.get_etc_passwd(@chuser).uid : nil
+            chgid = @chgroup ? ServerEngine::Privilege.get_etc_group(@chgroup).gid : nil
+            File.chown(chuid, chgid, @path)
+          end
+        else
+          @logdev = STDOUT
+        end
+
+        dl_opts = {}
+        # subtract 1 to match serverengine daemon logger side logging severity.
+        dl_opts[:log_level] = @level - 1
+        dl_opts[:log_rotate_age] = @log_rotate_age if @log_rotate_age
+        dl_opts[:log_rotate_size] = @log_rotate_size if @log_rotate_size
+        logger = ServerEngine::DaemonLogger.new(@logdev, dl_opts)
+        $log = Fluent::Log.new(logger, @opts)
+        $log.enable_color(false) if @path
+        $log.enable_debug if @level <= Fluent::Log::LEVEL_DEBUG
+      end
+
+      def stdout?
+        @logdev == STDOUT
+      end
+
+      def reopen!
+        if @path && @path != "-"
+          @logdev.reopen(@path, "a")
+        end
+        self
+      end
+
+      def apply_options(format: nil, time_format: nil, log_dir_perm: nil, ignore_repeated_log_interval: nil, ignore_same_log_interval: nil)
+        $log.format = format if format
+        $log.time_format = time_format if time_format
+        $log.ignore_repeated_log_interval = ignore_repeated_log_interval if ignore_repeated_log_interval
+        $log.ignore_same_log_interval = ignore_same_log_interval if ignore_same_log_interval
+
+        if @path && log_dir_perm
+          File.chmod(log_dir_perm || Fluent::DEFAULT_DIR_PERMISSION, File.dirname(@path))
+        end
+      end
+
+      def level=(level)
+        @level = level
+        $log.level = level
+      end
+    end
+
     def self.default_options
       {
         config_path: Fluent::DEFAULT_CONFIG_PATH,

@@ -28,8 +28,11 @@ module Fluent
       :without_source, :rpc_endpoint, :enable_get_dump, :process_name,
       :file_permission, :dir_permission, :counter_server, :counter_client,
       :strict_config_value, :enable_msgpack_time_support, :disable_shared_socket,
-      :metrics, :enable_input_metrics, :enable_size_metrics, :enable_jit
+      :metrics, :enable_input_metrics, :enable_size_metrics, :enable_jit,
+      :blocking_reload_interval
     ]
+
+    DEFAULT_BLOCKING_RELOAD_INTERVAL = 15
 
     config_param :workers,   :integer, default: 1
     config_param :restart_worker_interval, :time, default: 0
@@ -51,6 +54,7 @@ module Fluent
     config_param :enable_input_metrics, :bool, default: nil
     config_param :enable_size_metrics, :bool, default: nil
     config_param :enable_jit, :bool, default: false
+    config_param :blocking_reload_interval, :time, default: DEFAULT_BLOCKING_RELOAD_INTERVAL
     config_param :file_permission, default: nil do |v|
       v.to_i(8)
     end

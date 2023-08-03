@@ -19,7 +19,7 @@ end
 class SupervisorTest < ::Test::Unit::TestCase
   class DummyServer
     include Fluent::ServerModule
-    attr_accessor :rpc_endpoint, :enable_get_dump
+    attr_accessor :rpc_endpoint, :enable_get_dump, :blocking_reload_interval
     def config
       {}
     end
@@ -442,6 +442,7 @@ class SupervisorTest < ::Test::Unit::TestCase
 
     server = DummyServer.new
     server.rpc_endpoint = sys_conf.rpc_endpoint
+    server.blocking_reload_interval = sys_conf.blocking_reload_interval
     server.enable_get_dump = sys_conf.enable_get_dump
 
     server.run_rpc_server
@@ -512,6 +513,7 @@ class SupervisorTest < ::Test::Unit::TestCase
       }
     end
     server.rpc_endpoint = sys_conf.rpc_endpoint
+    server.blocking_reload_interval = sys_conf.blocking_reload_interval
 
     server.run_rpc_server
 
@@ -523,6 +525,102 @@ class SupervisorTest < ::Test::Unit::TestCase
   end
 
   def test_serverengine_config
+  sub_test_case "gracefulReload" do
+    SUCCEEDED_RELOADING_RESPONSE = {"ok": true}.to_json
+    FAILED_RELOADING_RESPONSE = {"message": "failed to reload config", "ok":false}.to_json
+
+    def setup
+      opts = Fluent::Supervisor.default_options
+      @sv = Fluent::Supervisor.new(opts)
+      @server = DummyServer.new
+      @port = unused_port
+    end
+
+    def teardown
+      @server.stop_rpc_server
+    end
+
+    def test_fail_graceful_reload_immediately
+      conf_data = <<-EOC
+    <system>
+      rpc_endpoint 0.0.0.0:#{@port}
+    </system>
+    EOC
+      conf = Fluent::Config.parse(conf_data, "(test)", "(test_dir)", true)
+      sys_conf = @sv.__send__(:build_system_config, conf)
+      @server.rpc_endpoint = sys_conf.rpc_endpoint
+      @server.blocking_reload_interval = sys_conf.blocking_reload_interval
+      @server.run_rpc_server
+      uri = URI.parse("http://127.0.0.1:#{@port}/api/config.gracefulReload")
+      response = Net::HTTP.get(uri)
+      assert_equal(FAILED_RELOADING_RESPONSE, response)
+    end
+
+    def test_graceful_reload_until_succeeds
+      conf_data = <<-EOC
+    <system>
+      rpc_endpoint 0.0.0.0:#{@port}
+    </system>
+    EOC
+      conf = Fluent::Config.parse(conf_data, "(test)", "(test_dir)", true)
+      sys_conf = @sv.__send__(:build_system_config, conf)
+      @server.rpc_endpoint = sys_conf.rpc_endpoint
+      @server.blocking_reload_interval = sys_conf.blocking_reload_interval
+      @server.run_rpc_server
+      uri = URI.parse("http://127.0.0.1:#{@port}/api/config.gracefulReload")
+      responses = []
+      threads = []
+      Fluent::SystemConfig::DEFAULT_BLOCKING_RELOAD_INTERVAL.times do |i|
+        threads << Thread.new do
+          sleep i
+          responses << JSON.parse(Net::HTTP.get(uri))
+        end
+      end
+      threads.each { |t| t.join }
+      warn_logs = $log.out.logs.collect { |log| log if log =~ /\[warn\]/ }.compact
+      sleep 1 # Ensure remaining time has passed
+      assert_equal([true, true, SUCCEEDED_RELOADING_RESPONSE],
+                   [responses.none? { |response| response["ok"] == true },
+                    warn_logs.all? { |log| log =~ /remaining:/ },
+                   Net::HTTP.get(uri)])
+    end
+
+    def test_blocking_reload_interval
+      conf_data = <<-EOC
+    <system>
+      rpc_endpoint 0.0.0.0:#{@port}
+      blocking_reload_interval 3
+    </system>
+    EOC
+      conf = Fluent::Config.parse(conf_data, "(test)", "(test_dir)", true)
+      sys_conf = @sv.__send__(:build_system_config, conf)
+      @server.rpc_endpoint = sys_conf.rpc_endpoint
+      @server.blocking_reload_interval = sys_conf.blocking_reload_interval
+      @server.install_supervisor_signal_handlers
+      @server.run_rpc_server
+      sleep 3 # Ensure remaining time has passed
+      uri = URI.parse("http://127.0.0.1:#{@port}/api/config.gracefulReload")
+      assert_equal(SUCCEEDED_RELOADING_RESPONSE, Net::HTTP.get(uri))
+    end
+  end
+
+  def test_load_config
+    tmp_dir = "#{TMP_DIR}/dir/test_load_config.conf"
+    conf_info_str = %[
+<system>
+  log_level info
+</system>
+]
+    conf_debug_str = %[
+<system>
+  log_level debug
+</system>
+]
+    now = Time.now
+    Timecop.freeze(now)
+
+    write_config tmp_dir, conf_info_str
+
     params = {}
     params['workers'] = 1
     params['fluentd_conf_path'] = "fluentd.conf"

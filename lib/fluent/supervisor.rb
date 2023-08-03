@@ -43,6 +43,8 @@ module Fluent
       @rpc_endpoint = nil
       @rpc_server = nil
       @counter = nil
+      @blocking_reload_interval = config[:blocking_reload_interval]
+      @block_reload_until = nil
 
       @fluentd_lock_dir = Dir.mktmpdir("fluentd-lock-")
       ENV['FLUENTD_LOCK_DIR'] = @fluentd_lock_dir
@@ -86,6 +88,7 @@ module Fluent
 
     def run_rpc_server
       @rpc_server = RPC::Server.new(@rpc_endpoint, $log)
+      @block_reload_until = Fluent::Clock.now + @blocking_reload_interval
 
       # built-in RPC for signals
       @rpc_server.mount_proc('/api/processes.interruptWorkers') { |req, res|
@@ -137,13 +140,15 @@ module Fluent
 
       @rpc_server.mount_proc('/api/config.gracefulReload') { |req, res|
         $log.debug "fluentd RPC got /api/config.gracefulReload request"
-        if Fluent.windows?
-          supervisor_sigusr2_handler
+        if @block_reload_until > Fluent::Clock.now
+          $log.warn "block gracefulReload until: #{Time.now + @block_reload_until - Fluent::Clock.now} " +
+                    "remaining: #{(@block_reload_until - Fluent::Clock.now).to_i} seconds"
+          [422, nil, {'message': 'failed to reload config'}]
         else
           Process.kill :USR2, Process.pid
         end
-
-        nil
+          nil
+        end
       }
 
       @rpc_server.mount_proc('/api/config.getDump') { |req, res|
@@ -462,7 +467,7 @@ module Fluent
         main_cmd: params['main_cmd'],
         signame: params['signame'],
         disable_shared_socket: params['disable_shared_socket'],
-        restart_worker_interval: params['restart_worker_interval'],
+        blocking_reload_interval: params['blocking_reload_interval']
       }
       se_config[:pid_path] = pid_path if daemonize
 
@@ -783,8 +788,15 @@ module Fluent
         'rpc_endpoint' => @system_config.rpc_endpoint,
         'enable_get_dump' => @system_config.enable_get_dump,
         'counter_server' => @system_config.counter_server,
+<<<<<<< HEAD
         'disable_shared_socket' => @system_config.disable_shared_socket,
         'restart_worker_interval' => @system_config.restart_worker_interval,
+=======
+        'log_format' => @system_config.log.format,
+        'log_time_format' => @system_config.log.time_format,
+        'disable_shared_socket' => @system_config.disable_shared_socket,
+        'blocking_reload_interval' => @system_config.blocking_reload_interval
+>>>>>>> 3194d933 (Block excessive gracefulReload requests)
       }
 
       se = ServerEngine.create(ServerModule, WorkerModule) {

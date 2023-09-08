@@ -11,9 +11,10 @@ module Fluent
       cert_state:    'CA',
       cert_locality: 'Mountain View',
       cert_common_name: 'Fluentd Forward CA',
+      cert_subject_alt_name: nil
     }
     HELP_TEXT = <<HELP
-Usage: fluent-ca-generate DIR_PATH PRIVATE_KEY_PASSPHRASE [--country COUNTRY] [--state STATE] [--locality LOCALITY] [--common-name COMMON_NAME]
+Usage: fluent-ca-generate DIR_PATH PRIVATE_KEY_PASSPHRASE [--country COUNTRY] [--state STATE] [--locality LOCALITY] [--common-name COMMON_NAME] [--subject-alt-name SUBJECT_ALT_NAME]
 HELP
 
     def initialize(argv = ARGV)
@@ -85,6 +86,9 @@ HELP
       cert.issuer = issuer
       cert.subject = subject
       cert.add_extension(factory.create_extension('basicConstraints', 'CA:TRUE'))
+      if opts[:cert_subject_alt_name]
+        cert.add_extension(factory.create_extension('subjectAltName', opts[:cert_subject_alt_name]))
+      end
       cert.sign(key, digest)
 
       return cert, key
@@ -140,6 +144,9 @@ HELP
       cert.serial = 1
       cert.issuer = issuer
       cert.subject  = subject
+
+      factory = OpenSSL::X509::ExtensionFactory.new
+
       cert.sign(key, digest)
 
       return cert, key
@@ -174,6 +181,26 @@ HELP
       @opt_parser.on('--common-name [COMMON_NAME]',
                      "configure common name (default: #{DEFAULT_OPTIONS[:cert_common_name]})") do |v|
         @options[:cert_common_name] = v
+      end
+      @opt_parser.on('--subject-alt-name [SUBJECT_ALT_NAME]',
+                     "configure subject alt name extension. specify comma separated hostname or IP address (default: #{DEFAULT_OPTIONS[:cert_subject_alt_name]})") do |v|
+        san_list = v.split(",").collect do |hostname_or_address|
+          san = ""
+          address = IPAddr.new(hostname_or_address) rescue nil
+          if address
+            san = "IP:#{address}"
+          else
+            address = Resolv.getaddress(hostname_or_address) rescue nil
+            if address
+              san = "DNS:#{hostname_or_address}"
+            end
+          end
+          unless address
+            raise ArgumentError, "#{v} is not comma separated hostname or IP address"
+          end
+          san
+        end
+        @options[:cert_subject_alt_name] = san_list.join(",")
       end
     end
 

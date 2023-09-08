@@ -65,5 +65,30 @@ TEXT
         end
       end
     end
+
+    test "subjectAltName with example.com" do
+      Dir.mktmpdir do |dir|
+        Fluent::CaGenerate.new([dir, "fluentd", "--subject-alt-name", "example.com"]).call
+        cert = OpenSSL::X509::Certificate.new(File.read("#{dir}/ca_cert.pem"))
+        cert.extensions.each do |extension|
+          pp extension.oid
+          pp extension.value
+        end
+      end
+    end
+
+    test "subjectAltName with IP address" do
+    end
+
+    test "subjectAltName with example.com and IP address" do
+    end
+
+    test "subjectAltName with non resolved hostname" do
+      assert_raise(ArgumentError.new("nonexistent-hostname is not comma separated hostname or IP address")) do
+        Dir.mktmpdir do |dir|
+          Fluent::CaGenerate.new([dir, "fluentd", "--subject-alt-name", "nonexistent-hostname"]).call
+        end
+      end
+    end
   end
 end

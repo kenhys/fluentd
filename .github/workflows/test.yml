@@ -39,6 +39,9 @@ jobs:
       - name: Install addons
         if: ${{ matrix.os == 'ubuntu-latest' }}
         run: sudo apt-get install libgmp3-dev libcap-ng-dev
+      - name: Show gcc toolchains
+        if: ${{ matrix.os == 'windows-latest' }}
+        run: ridk exec pacman -Qs gcc
       - name: Install dependencies
         run: bundle install
       - name: Run tests

@@ -15,6 +15,7 @@
 #
 
 require 'fluent/config/error'
+require 'fluent/code_validator'
 
 module Fluent
   class Registry
@@ -27,6 +28,7 @@ module Fluent
       @dir_search_prefix = dir_search_prefix
       @map = {}
       @paths = []
+      @validator = Fluent::Validator::DependencyModuleValidator.new
     end
 
     attr_reader :kind, :paths, :map, :dir_search_prefix
@@ -45,8 +47,27 @@ module Fluent
       if value = @map[type]
         return value
       end
-      raise NotFoundPluginError.new("Unknown #{@kind} plugin '#{type}'. Run 'gem search -rd fluent-plugin' to find plugins",
-                                    kind: @kind, type: type)
+      ["yajl/json_gem"].each do |mod|
+        if unreliable_module_used?(type, mod)
+          raise ConfigError, "Unreliable module <#{mod}> is used for #{@kind} plugin '#{type}'."
+        end
+      end
+
+      raise ConfigError, "Unknown #{@kind} plugin '#{type}'. Run 'gem search -rd fluent-plugin' to find plugins"  # TODO error class
+    end
+
+    def unreliable_module_used?(type, mod)
+      @paths.each do |plugin_dir|
+        path = File.join(plugin_dir, "#{type.to_s}.rb")
+        if File.exist?(path)
+          begin
+            return @validator.validate(path)
+          rescue RuntimeError => e
+            return true
+          end
+        end
+      end
+      false
     end
 
     def reverse_lookup(value)

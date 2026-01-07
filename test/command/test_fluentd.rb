@@ -7,6 +7,7 @@ require 'fileutils'
 require 'timeout'
 require 'securerandom'
 require 'fluent/file_wrapper'
+require 'fluent/code_validator'
 
 class TestFluentdCommand < ::Test::Unit::TestCase
   SUPERVISOR_PID_PATTERN = /starting fluentd-[.0-9]+ pid=(\d+)/
@@ -1297,6 +1298,106 @@ CONF
       assert File.exist?(conf_path)
       assert_log_matches(create_cmdline(conf_path, "--inline-config", inline_conf),
                          "[debug]")
+
+    end
+
+  end
+
+  sub_test_case 'validate dependency module' do
+
+    def create_plugin_content(kind, klass, body = "def configure(conf)\n      require 'yajl/json_gem'\n    end")
+      content = <<EOS
+require 'fluent/plugin/#{kind}'
+module Fluent::Plugin
+  class Sample#{klass} < #{klass}
+    Fluent::Plugin.register_#{kind}("unreliable", self)
+
+    #{body}
+  end
+end
+EOS
+      content
+    end
+
+    test "reliable plugin" do
+      code =<<EOS
+def configure
+  require 'yajl'
+end
+EOS
+      content = create_plugin_content("out", "Output", code)
+      plugin_path = create_plugin_file("out_reliable.rb", content)
+      conf = <<CONF
+<match **>
+  @type reliable
+</match>
+CONF
+      conf_path = create_conf_file('reliable.conf', conf)
+      assert_log_matches(create_cmdline(conf_path, "-p", File.dirname(plugin_path)), "fluentd worker is now running", 'worker=0')
+    end
+
+    test "unreliable input plugin" do
+      content = create_plugin_content("input", "Input")
+      plugin_path = create_plugin_file("in_unreliable.rb", content)
+      p plugin_path
+      puts content
+      conf = <<CONF
+<source>
+  @type unreliable
+  @id dummy
+  @label @dummydata
+  tag dummy
+  dummy {"message": "yay!"}
+</source>
+CONF
+      conf_path = create_conf_file('unreliable.conf', conf)
+      assert_fluentd_fails_to_start(
+        create_cmdline(conf_path, "-p", File.dirname(plugin_path)),
+        "Unreliable module <yajl/json_gem> is used for input plugin 'unreliable'."
+      )
+    end
+
+    test "unreliable output plugin" do
+      content = create_plugin_content("out", "Output")
+      plugin_path = create_plugin_file("out_unreliable.rb", content)
+      conf = <<CONF
+<match **>
+  @type unreliable
+</match>
+CONF
+      conf_path = create_conf_file('unreliable.conf', conf)
+      assert_fluentd_fails_to_start(
+        create_cmdline(conf_path, "-p", File.dirname(plugin_path)),
+        "Unreliable module <yajl/json_gem> is used for output plugin 'unreliable'."
+      )
+    end
+
+    test "nested unreliable plugin" do
+      code =<<EOS
+def configure
+  begin
+    begin
+      begin
+        require 'yajl/json_gem'
+      rescue
+    resuce
+    end
+  rescue
+  end
+end
+EOS
+      content = create_plugin_content("out", "Output", code)
+      plugin_path = create_plugin_file("out_unreliable", content)
+      conf = <<CONF
+<match **>
+  @type unreliable
+</match>
+CONF
+      conf_path = create_conf_file('unreliable.conf', conf)
+      assert_fluentd_fails_to_start(
+        create_cmdline(conf_path, "-p", File.dirname(plugin_path)),
+        "Unreliable module <yajl/json_gem> is used for output plugin 'unreliable'."
+      )
     end
   end
 

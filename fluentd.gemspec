@@ -50,6 +50,7 @@ Gem::Specification.new do |gem|
 
   # gems that aren't default gems as of Ruby 3.5
   gem.add_runtime_dependency("logger", ["~> 1.6"])
+  gem.add_runtime_dependency("parser",  [">= 3.0.2.0"])
 
   # build gem for a certain platform. see also Rakefile
   fake_platform = ENV['GEM_BUILD_FAKE_PLATFORM'].to_s

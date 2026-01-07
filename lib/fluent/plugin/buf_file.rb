@@ -108,6 +108,19 @@ module Fluent
         else
           @dir_permission = system_config.dir_permission || Fluent::DEFAULT_DIR_PERMISSION
         end
+
+        if Fluent.windows?
+          begin
+            require 'win32/registry'
+            if owner.respond_to?(:buffer_config) && owner.buffer_config&.flush_at_shutdown
+              Win32::Registry::HKEY_LOCAL_MACHINE.open("SYSTEM\\CurrentControlSet\\Control") do |reg|
+                if reg.read("WaitToKillServiceTimeout") <= 20
+                  log.warn("flush_at_shutdown might cause buffer corruption when Fluentd service was forcibly killed. Recommend to use longer  WaitToKillServiceTimeout.")
+                end
+              end
+            end
+          end
+        end
       end
 
       # This method is called only when multi worker is configured

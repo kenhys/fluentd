@@ -195,6 +195,18 @@ class FileBufferTest < Test::Unit::TestCase
         end
       end
     end
+
+    test 'warn flush_at_shutdown use-case' do
+      omit "WaitToKillServiceTimeout is supported only for Windows" unless Fluent.windows?
+      FileUtils.mkdir_p @bufdir
+      buf_conf = config_element('buffer', '', {'flush_at_shutdown' => true})
+      # mock WaitToKillServiceTimeout <= 20
+      assert_nothing_raised do
+        Fluent::SystemConfig.overwrite_system_config('root_dir' => @bufdir, 'workers' => 4) do
+          @d.configure(config_element('ROOT', '', {}, [buf_conf]))
+        end
+      end
+    end
   end
 
   sub_test_case 'buffer plugin configured only with path' do
@@ -1506,6 +1518,29 @@ class FileBufferTest < Test::Unit::TestCase
       end
 
       assert_equal(expected_records, actual_records)
+    end
+  end
+
+  sub_test_case 'warn flush_at_shutdown use-case' do
+    setup do
+      @id_output = 'backup_test'
+      @bufdir = File.expand_path('../../tmp/broken_buffer_file', __FILE__)
+      FileUtils.rm_rf @bufdir rescue nil
+      FileUtils.mkdir_p @bufdir
+      @bufpath = File.join(@bufdir, 'broken_test.*.log')
+
+      Fluent::Test.setup
+    end
+
+    teardown do
+      if @p
+        @p.stop unless @p.stopped?
+        @p.before_shutdown unless @p.before_shutdown?
+        @p.shutdown unless @p.shutdown?
+        @p.after_shutdown unless @p.after_shutdown?
+        @p.close unless @p.closed?
+        @p.terminate unless @p.terminated?
+      end
     end
   end
 end

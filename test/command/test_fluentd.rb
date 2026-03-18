@@ -1760,4 +1760,22 @@ CONF
       end
     end
   end
+
+  sub_test_case "test suspicious shorter service timeout on windows" do
+    test 'warn the default value of timekey (1d) is used as-is' do
+      omit "skip service timeout on windows test case" unless Fluent.windows?
+      conf_path = create_conf_file("warning.conf", <<~EOF)
+                    <system>
+                      config_include_dir ""
+                    </system>
+                    <match>
+                      @type file
+                      path #{@tmp_dir}/test.log
+                      flush_at_shutdown
+                    </match>
+                  EOF
+      message="your WaitToKillServiceTimeout=5000 registry configuration seems too short. Recommend to extend that value not to corrupt flushing buffer with forcibly shutdown"
+      assert_log_matches(create_cmdline(conf_path, '--dry-run'), message)
+    end
+  end
 end

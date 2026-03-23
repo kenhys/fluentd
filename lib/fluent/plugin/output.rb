@@ -927,11 +927,14 @@ module Fluent
 
       def calculate_timekey(time)
         time_int = time.to_i
+        return @calculate_timekey_last_timekey if @calculate_timekey_last_time_int == time_int
+
+        @calculate_timekey_last_time_int = time_int
         if @timekey_use_utc
-          (time_int - (time_int % @timekey)).to_i
+          @calculate_timekey_last_timekey = (time_int - (time_int % @timekey)).to_i
         else
           offset = @calculate_offset ? @calculate_offset.call(time) : @offset
-          (time_int - ((time_int + offset)% @timekey)).to_i
+          @calculate_timekey_last_timekey = (time_int - ((time_int + offset) % @timekey)).to_i
         end
       end
 

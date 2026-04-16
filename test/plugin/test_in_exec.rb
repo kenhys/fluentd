@@ -295,4 +295,48 @@ EOC
       assert_match(/LoadError/, event[2]['message'])
     end
   end
+  sub_test_case 'command_timeout' do
+    test 'configure command_timeout' do
+      d = create_driver %[
+        command ruby -e "sleep 10"
+        tag test
+        run_interval 1s
+        command_timeout 1s
+        <parse>
+          @type none
+        </parse>
+      ]
+      assert_equal 1.0, d.instance.command_timeout
+    end
+
+    test 'command_timeout kills long-running child process' do
+      d = create_driver %[
+        command ruby -e "sleep 10"
+        tag test
+        run_interval 5s
+        command_timeout 1s
+        <parse>
+          @type none
+        </parse>
+      ]
+      start_time = Time.now
+      d.run(timeout: 5) do
+        sleep 1 # avoid to return test immediately
+      end
+      elapsed = Time.now - start_time
+      assert (elapsed >= 1.0 and elapsed < 5), "command should have been killed by command_timeout"
+    end
+
+    test 'command_timeout defaults to nil' do
+      d = create_driver %[
+        command ruby -e "puts 'hello'"
+        tag test
+        run_interval 1s
+        <parse>
+          @type none
+        </parse>
+      ]
+      assert_nil d.instance.command_timeout
+    end
+  end
 end
